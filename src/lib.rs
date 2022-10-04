@@ -22,7 +22,7 @@
 //!     assert_eq!(compose('A','\u{30a}'), Some('Å'));
 //!
 //!     let s = "ÅΩ";
-//!     let c = s.nfc().collect::<String>();
+//!     let c = s.nfc().map(Result::unwrap).collect::<String>();
 //!     assert_eq!(c, "ÅΩ");
 //! }
 //! ```
@@ -42,15 +42,7 @@
     html_logo_url = "https://unicode-rs.github.io/unicode-rs_sm.png",
     html_favicon_url = "https://unicode-rs.github.io/unicode-rs_sm.png"
 )]
-#![cfg_attr(not(feature = "std"), no_std)]
-
-#[cfg(not(feature = "std"))]
-extern crate alloc;
-
-#[cfg(feature = "std")]
-extern crate core;
-
-extern crate tinyvec;
+#![no_std]
 
 pub use crate::decompose::Decompositions;
 pub use crate::quick_check::{
@@ -62,12 +54,7 @@ pub use crate::recompose::Recompositions;
 pub use crate::replace::Replacements;
 pub use crate::stream_safe::StreamSafe;
 pub use crate::tables::UNICODE_VERSION;
-use core::{
-    str::Chars,
-    option,
-};
-
-mod no_std_prelude;
+use core::{option, str::Chars};
 
 mod decompose;
 mod lookups;
@@ -169,7 +156,6 @@ impl<'a> UnicodeNormalization<Chars<'a>> for &'a str {
     }
 }
 
-
 impl UnicodeNormalization<option::IntoIter<char>> for char {
     #[inline]
     fn nfd(self) -> Decompositions<option::IntoIter<char>> {
@@ -233,3 +219,7 @@ impl<I: Iterator<Item = char>> UnicodeNormalization<I> for I {
         StreamSafe::new(self)
     }
 }
+
+/// Buffer overflow error
+#[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord, Hash)]
+pub struct BufferOverflow;

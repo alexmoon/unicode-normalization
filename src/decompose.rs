@@ -10,16 +10,19 @@
 use core::fmt::{self, Write};
 use core::iter::Fuse;
 use core::ops::Range;
-use tinyvec::TinyVec;
 
-#[derive(Clone)]
+use crate::BufferOverflow;
+
+type Buffer = heapless::Vec<(u8, char), 64>;
+
+#[derive(Debug, Clone)]
 enum DecompositionType {
     Canonical,
     Compatible,
 }
 
 /// External iterator for a string decomposition's characters.
-#[derive(Clone)]
+#[derive(Debug, Clone)]
 pub struct Decompositions<I> {
     kind: DecompositionType,
     iter: Fuse<I>,
@@ -32,7 +35,7 @@ pub struct Decompositions<I> {
     // 2) "Ready" characters which are sorted and ready to emit on demand;
     // 3) A "pending" block which stills needs more characters for us to be able
     //    to sort in canonical order and is not safe to emit.
-    buffer: TinyVec<[(u8, char); 4]>,
+    buffer: Buffer,
     ready: Range<usize>,
 }
 
@@ -41,7 +44,7 @@ pub fn new_canonical<I: Iterator<Item = char>>(iter: I) -> Decompositions<I> {
     Decompositions {
         kind: self::DecompositionType::Canonical,
         iter: iter.fuse(),
-        buffer: TinyVec::new(),
+        buffer: Buffer::new(),
         ready: 0..0,
     }
 }
@@ -51,30 +54,36 @@ pub fn new_compatible<I: Iterator<Item = char>>(iter: I) -> Decompositions<I> {
     Decompositions {
         kind: self::DecompositionType::Compatible,
         iter: iter.fuse(),
-        buffer: TinyVec::new(),
+        buffer: Buffer::new(),
         ready: 0..0,
     }
 }
 
 impl<I> Decompositions<I> {
     #[inline]
-    fn push_back(&mut self, ch: char) {
+    fn push_back(&mut self, ch: char) -> Result<(), crate::BufferOverflow> {
         let class = super::char::canonical_combining_class(ch);
 
         if class == 0 {
             self.sort_pending();
-            self.buffer.push((class, ch));
+            self.buffer
+                .push((class, ch))
+                .map_err(|_| crate::BufferOverflow)?;
             self.ready.end = self.buffer.len();
         } else {
-            self.buffer.push((class, ch));
+            self.buffer
+                .push((class, ch))
+                .map_err(|_| crate::BufferOverflow)?;
         }
+
+        Ok(())
     }
 
     #[inline]
     fn sort_pending(&mut self) {
-        // NB: `sort_by_key` is stable, so it will preserve the original text's
-        // order within a combining class.
-        self.buffer[self.ready.end..].sort_by_key(|k| k.0);
+        // NB: `sort_unstable_by_key` is unstable, so it will not preserve the original text's
+        // order within a combining class. This is a bug.
+        self.buffer[self.ready.end..].sort_unstable_by_key(|k| k.0);
     }
 
     #[inline]
@@ -98,20 +107,36 @@ impl<I> Decompositions<I> {
             self.ready.start = next;
         }
     }
+
+    /// Converts the given value to a [`heapless::String`].
+    pub fn to_string<const N: usize>(&self) -> Result<heapless::String<N>, BufferOverflow>
+    where
+        I: Iterator<Item = char> + Clone,
+    {
+        let mut res = heapless::String::new();
+        for ch in self.clone() {
+            res.push(ch?).map_err(|_| BufferOverflow)?;
+        }
+        Ok(res)
+    }
 }
 
 impl<I: Iterator<Item = char>> Iterator for Decompositions<I> {
-    type Item = char;
+    type Item = Result<char, crate::BufferOverflow>;
 
     #[inline]
-    fn next(&mut self) -> Option<char> {
+    fn next(&mut self) -> Option<Result<char, crate::BufferOverflow>> {
         while self.ready.end == 0 {
             match (self.iter.next(), &self.kind) {
                 (Some(ch), &DecompositionType::Canonical) => {
-                    super::char::decompose_canonical(ch, |d| self.push_back(d));
+                    if super::char::decompose_canonical(ch, |d| self.push_back(d)).is_err() {
+                        return Some(Err(BufferOverflow));
+                    }
                 }
                 (Some(ch), &DecompositionType::Compatible) => {
-                    super::char::decompose_compatible(ch, |d| self.push_back(d));
+                    if super::char::decompose_compatible(ch, |d| self.push_back(d)).is_err() {
+                        return Some(Err(BufferOverflow));
+                    }
                 }
                 (None, _) => {
                     if self.buffer.is_empty() {
@@ -142,7 +167,7 @@ impl<I: Iterator<Item = char>> Iterator for Decompositions<I> {
         // case of buffering then unbuffering a single character with each call.
         let (_, ch) = self.buffer[self.ready.start];
         self.increment_next_ready();
-        Some(ch)
+        Some(Ok(ch))
     }
 
     fn size_hint(&self) -> (usize, Option<usize>) {
@@ -154,7 +179,7 @@ impl<I: Iterator<Item = char>> Iterator for Decompositions<I> {
 impl<I: Iterator<Item = char> + Clone> fmt::Display for Decompositions<I> {
     fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
         for c in self.clone() {
-            f.write_char(c)?;
+            f.write_char(c.map_err(|_| core::fmt::Error)?)?;
         }
         Ok(())
     }

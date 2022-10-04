@@ -22,11 +22,5 @@ edition = "2018"
 
 exclude = [ "target/*", "Cargo.lock", "scripts/tmp", "*.txt", "tests/*" ]
 
-[dependencies.tinyvec]
-version = "1"
-features = ["alloc"]
-
-
-[features]
-default = ["std"]
-std = []
+[dependencies]
+heapless = "0.7.16"

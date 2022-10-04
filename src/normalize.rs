@@ -20,9 +20,9 @@ use core::{char, ops::FnMut};
 /// See [Unicode Standard Annex #15](http://www.unicode.org/reports/tr15/)
 /// for more information.
 #[inline]
-pub fn decompose_canonical<F>(c: char, emit_char: F)
+pub fn decompose_canonical<F, E>(c: char, emit_char: F) -> Result<(), E>
 where
-    F: FnMut(char),
+    F: FnMut(char) -> Result<(), E>,
 {
     decompose(c, canonical_fully_decomposed, emit_char)
 }
@@ -31,7 +31,10 @@ where
 /// See [Unicode Standard Annex #15](http://www.unicode.org/reports/tr15/)
 /// for more information.
 #[inline]
-pub fn decompose_compatible<F: FnMut(char)>(c: char, emit_char: F) {
+pub fn decompose_compatible<F, E>(c: char, emit_char: F) -> Result<(), E>
+where
+    F: FnMut(char) -> Result<(), E>,
+{
     let decompose_char =
         |c| compatibility_fully_decomposed(c).or_else(|| canonical_fully_decomposed(c));
     decompose(c, decompose_char, emit_char)
@@ -47,56 +50,53 @@ pub fn decompose_compatible<F: FnMut(char)>(c: char, emit_char: F) {
 /// [Unicode 6.3 Release Summary](https://www.unicode.org/versions/Unicode6.3.0/#Summary)
 /// for more information.
 #[inline]
-pub fn decompose_cjk_compat_variants<F>(c: char, mut emit_char: F)
+pub fn decompose_cjk_compat_variants<F, E>(c: char, mut emit_char: F) -> Result<(), E>
 where
-    F: FnMut(char),
+    F: FnMut(char) -> Result<(), E>,
 {
     // 7-bit ASCII never decomposes
     if c <= '\x7f' {
-        emit_char(c);
-        return;
+        return emit_char(c);
     }
 
     // Don't perform decomposition for Hangul
 
     if let Some(decomposed) = cjk_compat_variants_fully_decomposed(c) {
         for &d in decomposed {
-            emit_char(d);
+            emit_char(d)?;
         }
-        return;
+        return Ok(());
     }
 
     // Finally bottom out.
-    emit_char(c);
+    emit_char(c)
 }
 
 #[inline]
-fn decompose<D, F>(c: char, decompose_char: D, mut emit_char: F)
+fn decompose<D, F, E>(c: char, decompose_char: D, mut emit_char: F) -> Result<(), E>
 where
     D: Fn(char) -> Option<&'static [char]>,
-    F: FnMut(char),
+    F: FnMut(char) -> Result<(), E>,
 {
     // 7-bit ASCII never decomposes
     if c <= '\x7f' {
-        emit_char(c);
-        return;
+        return emit_char(c);
     }
 
     // Perform decomposition for Hangul
     if is_hangul_syllable(c) {
-        decompose_hangul(c, emit_char);
-        return;
+        return decompose_hangul(c, emit_char);
     }
 
     if let Some(decomposed) = decompose_char(c) {
         for &d in decomposed {
-            emit_char(d);
+            emit_char(d)?;
         }
-        return;
+        return Ok(());
     }
 
     // Finally bottom out.
-    emit_char(c);
+    emit_char(c)
 }
 
 /// Compose two characters into a single character, if possible.
@@ -134,23 +134,25 @@ pub(crate) fn is_hangul_syllable(c: char) -> bool {
 // Decompose a precomposed Hangul syllable
 #[allow(unsafe_code)]
 #[inline(always)]
-fn decompose_hangul<F>(s: char, mut emit_char: F)
+fn decompose_hangul<F, E>(s: char, mut emit_char: F) -> Result<(), E>
 where
-    F: FnMut(char),
+    F: FnMut(char) -> Result<(), E>,
 {
     let s_index = s as u32 - S_BASE;
     let l_index = s_index / N_COUNT;
     unsafe {
-        emit_char(char::from_u32_unchecked(L_BASE + l_index));
+        emit_char(char::from_u32_unchecked(L_BASE + l_index))?;
 
         let v_index = (s_index % N_COUNT) / T_COUNT;
-        emit_char(char::from_u32_unchecked(V_BASE + v_index));
+        emit_char(char::from_u32_unchecked(V_BASE + v_index))?;
 
         let t_index = s_index % T_COUNT;
         if t_index > 0 {
-            emit_char(char::from_u32_unchecked(T_BASE + t_index));
+            emit_char(char::from_u32_unchecked(T_BASE + t_index))?;
         }
     }
+
+    Ok(())
 }
 
 #[inline]

@@ -109,7 +109,7 @@ pub fn is_nfc(s: &str) -> bool {
     match is_nfc_quick(s.chars()) {
         IsNormalized::Yes => true,
         IsNormalized::No => false,
-        IsNormalized::Maybe => s.chars().eq(s.chars().nfc()),
+        IsNormalized::Maybe => s.chars().map(Ok).eq(s.chars().nfc()),
     }
 }
 
@@ -119,7 +119,7 @@ pub fn is_nfkc(s: &str) -> bool {
     match is_nfkc_quick(s.chars()) {
         IsNormalized::Yes => true,
         IsNormalized::No => false,
-        IsNormalized::Maybe => s.chars().eq(s.chars().nfkc()),
+        IsNormalized::Maybe => s.chars().map(Ok).eq(s.chars().nfkc()),
     }
 }
 
@@ -129,7 +129,7 @@ pub fn is_nfd(s: &str) -> bool {
     match is_nfd_quick(s.chars()) {
         IsNormalized::Yes => true,
         IsNormalized::No => false,
-        IsNormalized::Maybe => s.chars().eq(s.chars().nfd()),
+        IsNormalized::Maybe => s.chars().map(Ok).eq(s.chars().nfd()),
     }
 }
 
@@ -139,7 +139,7 @@ pub fn is_nfkd(s: &str) -> bool {
     match is_nfkd_quick(s.chars()) {
         IsNormalized::Yes => true,
         IsNormalized::No => false,
-        IsNormalized::Maybe => s.chars().eq(s.chars().nfkd()),
+        IsNormalized::Maybe => s.chars().map(Ok).eq(s.chars().nfkd()),
     }
 }
 
@@ -149,7 +149,7 @@ pub fn is_nfc_stream_safe(s: &str) -> bool {
     match is_nfc_stream_safe_quick(s.chars()) {
         IsNormalized::Yes => true,
         IsNormalized::No => false,
-        IsNormalized::Maybe => s.chars().eq(s.chars().stream_safe().nfc()),
+        IsNormalized::Maybe => s.chars().map(Ok).eq(s.chars().stream_safe().nfc()),
     }
 }
 
@@ -159,7 +159,7 @@ pub fn is_nfd_stream_safe(s: &str) -> bool {
     match is_nfd_stream_safe_quick(s.chars()) {
         IsNormalized::Yes => true,
         IsNormalized::No => false,
-        IsNormalized::Maybe => s.chars().eq(s.chars().stream_safe().nfd()),
+        IsNormalized::Maybe => s.chars().map(Ok).eq(s.chars().stream_safe().nfd()),
     }
 }
 

@@ -109,12 +109,9 @@ mod tests {
     use crate::lookups::canonical_combining_class;
     use crate::normalize::decompose_compatible;
 
-    #[cfg(not(feature = "std"))]
-    use crate::no_std_prelude::*;
-
     use core::char;
 
-    fn stream_safe(s: &str) -> String {
+    fn stream_safe(s: &str) -> heapless::String<256> {
         StreamSafe::new(s.chars()).collect()
     }
 
@@ -148,8 +145,8 @@ mod tests {
                 None => continue,
             };
             let c = classify_nonstarters(ch);
-            let mut s = Vec::new();
-            decompose_compatible(ch, |c| s.push(c));
+            let mut s = heapless::Vec::<char, 128>::new();
+            decompose_compatible(ch, |c| s.push(c)).unwrap();
 
             assert_eq!(s.len(), c.decomposition_len);
 

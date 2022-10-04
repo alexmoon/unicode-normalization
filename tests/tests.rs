@@ -20,7 +20,7 @@ fn test_normalization_tests_unaffected() {
 fn test_official() {
     macro_rules! normString {
         ($method: ident, $input: expr) => {
-            $input.$method().collect::<String>()
+            $input.$method().map(Result::unwrap).collect::<String>()
         };
     }
 

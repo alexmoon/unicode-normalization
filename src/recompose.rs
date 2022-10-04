@@ -8,11 +8,12 @@
 // option. This file may not be copied, modified, or distributed
 // except according to those terms.
 
-use crate::decompose::Decompositions;
+use crate::{decompose::Decompositions, BufferOverflow};
 use core::fmt::{self, Write};
-use tinyvec::TinyVec;
 
-#[derive(Clone)]
+type Buffer = heapless::Vec<char, 32>;
+
+#[derive(Debug, Clone)]
 enum RecompositionState {
     Composing,
     Purging(usize),
@@ -24,7 +25,7 @@ enum RecompositionState {
 pub struct Recompositions<I> {
     iter: Decompositions<I>,
     state: RecompositionState,
-    buffer: TinyVec<[char; 4]>,
+    buffer: Buffer,
     composee: Option<char>,
     last_ccc: Option<u8>,
 }
@@ -34,7 +35,7 @@ pub fn new_canonical<I: Iterator<Item = char>>(iter: I) -> Recompositions<I> {
     Recompositions {
         iter: super::decompose::new_canonical(iter),
         state: self::RecompositionState::Composing,
-        buffer: TinyVec::new(),
+        buffer: Buffer::new(),
         composee: None,
         last_ccc: None,
     }
@@ -45,28 +46,32 @@ pub fn new_compatible<I: Iterator<Item = char>>(iter: I) -> Recompositions<I> {
     Recompositions {
         iter: super::decompose::new_compatible(iter),
         state: self::RecompositionState::Composing,
-        buffer: TinyVec::new(),
+        buffer: Buffer::new(),
         composee: None,
         last_ccc: None,
     }
 }
 
 impl<I: Iterator<Item = char>> Iterator for Recompositions<I> {
-    type Item = char;
+    type Item = Result<char, BufferOverflow>;
 
     #[inline]
-    fn next(&mut self) -> Option<char> {
+    fn next(&mut self) -> Option<Result<char, BufferOverflow>> {
         use self::RecompositionState::*;
 
         loop {
             match self.state {
                 Composing => {
                     for ch in self.iter.by_ref() {
+                        let ch = match ch {
+                            Ok(ch) => ch,
+                            Err(err) => return Some(Err(err)),
+                        };
                         let ch_class = super::char::canonical_combining_class(ch);
                         let k = match self.composee {
                             None => {
                                 if ch_class != 0 {
-                                    return Some(ch);
+                                    return Some(Ok(ch));
                                 }
                                 self.composee = Some(ch);
                                 continue;
@@ -82,9 +87,11 @@ impl<I: Iterator<Item = char>> Iterator for Recompositions<I> {
                                 None => {
                                     if ch_class == 0 {
                                         self.composee = Some(ch);
-                                        return Some(k);
+                                        return Some(Ok(k));
                                     }
-                                    self.buffer.push(ch);
+                                    if self.buffer.push(ch).is_err() {
+                                        return Some(Err(BufferOverflow));
+                                    }
                                     self.last_ccc = Some(ch_class);
                                 }
                             },
@@ -95,9 +102,11 @@ impl<I: Iterator<Item = char>> Iterator for Recompositions<I> {
                                         self.composee = Some(ch);
                                         self.last_ccc = None;
                                         self.state = Purging(0);
-                                        return Some(k);
+                                        return Some(Ok(k));
                                     }
-                                    self.buffer.push(ch);
+                                    if self.buffer.push(ch).is_err() {
+                                        return Some(Err(BufferOverflow));
+                                    }
                                     self.last_ccc = Some(ch_class);
                                     continue;
                                 }
@@ -107,7 +116,9 @@ impl<I: Iterator<Item = char>> Iterator for Recompositions<I> {
                                         continue;
                                     }
                                     None => {
-                                        self.buffer.push(ch);
+                                        if self.buffer.push(ch).is_err() {
+                                            return Some(Err(BufferOverflow));
+                                        }
                                         self.last_ccc = Some(ch_class);
                                     }
                                 }
@@ -116,7 +127,7 @@ impl<I: Iterator<Item = char>> Iterator for Recompositions<I> {
                     }
                     self.state = Finished(0);
                     if self.composee.is_some() {
-                        return self.composee.take();
+                        return self.composee.take().map(Ok);
                     }
                 }
                 Purging(next) => match self.buffer.get(next).cloned() {
@@ -126,17 +137,17 @@ impl<I: Iterator<Item = char>> Iterator for Recompositions<I> {
                     }
                     s => {
                         self.state = Purging(next + 1);
-                        return s;
+                        return s.map(Ok);
                     }
                 },
                 Finished(next) => match self.buffer.get(next).cloned() {
                     None => {
                         self.buffer.clear();
-                        return self.composee.take();
+                        return self.composee.take().map(Ok);
                     }
                     s => {
                         self.state = Finished(next + 1);
-                        return s;
+                        return s.map(Ok);
                     }
                 },
             }
@@ -144,10 +155,24 @@ impl<I: Iterator<Item = char>> Iterator for Recompositions<I> {
     }
 }
 
+impl<I> Recompositions<I> {
+    /// Converts the given value to a [`heapless::String`].
+    pub fn to_string<const N: usize>(&self) -> Result<heapless::String<N>, BufferOverflow>
+    where
+        I: Iterator<Item = char> + Clone,
+    {
+        let mut res = heapless::String::new();
+        for ch in self.clone() {
+            res.push(ch?).map_err(|_| BufferOverflow)?;
+        }
+        Ok(res)
+    }
+}
+
 impl<I: Iterator<Item = char> + Clone> fmt::Display for Recompositions<I> {
     fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
         for c in self.clone() {
-            f.write_char(c)?;
+            f.write_char(c.map_err(|_| core::fmt::Error)?)?;
         }
         Ok(())
     }
